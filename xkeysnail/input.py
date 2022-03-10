@@ -107,9 +107,8 @@ def loop(device_matches, device_watch, quiet):
         exit(1)
 
     if device_watch:
-        from inotify_simple import INotify, flags
-        inotify = INotify()
-        inotify.add_watch("/dev/input", flags.CREATE | flags.ATTRIB)
+        from .watch import watch
+        notify = watch()
         print("Watching keyboard devices plug in")
     device_filter = DeviceFilter(device_matches)
 
@@ -121,7 +120,7 @@ def loop(device_matches, device_watch, quiet):
             try:
                 waitables = devices[:]
                 if device_watch:
-                    waitables.append(inotify.fd)
+                    waitables.append(notify.fd)
                 r, w, x = select(waitables, [], [])
 
                 for waitable in r:
@@ -129,10 +128,13 @@ def loop(device_matches, device_watch, quiet):
                         for event in waitable.read():
                             if event.type == ecodes.EV_KEY:
                                 on_event(event, waitable.name, quiet)
+                            elif event.type != 0 or event.code != 0 or event.value != 1:
+                                print("Read strange event: ", str(event))
+                                pass
                             else:
                                 send_event(event)
                     else:
-                        new_devices = add_new_device(devices, device_filter, inotify)
+                        new_devices = add_new_device(devices, device_filter, notify)
                         if new_devices:
                             print("Okay, now enable remapping on the following new device(s):\n")
                             print_device_list(new_devices)
@@ -150,12 +152,12 @@ def loop(device_matches, device_watch, quiet):
             except OSError as e:
                 pass
         if device_watch:
-            inotify.close()
+            notify.close()
 
 
-def add_new_device(devices, device_filter, inotify):
+def add_new_device(devices, device_filter, notify):
     new_devices = []
-    for event in inotify.read():
+    for event in notify.read():
         new_device = InputDevice("/dev/input/" + event.name)
         if device_filter(new_device) and not in_device_list(new_device.fn, devices):
             try:
